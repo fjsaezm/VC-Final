@@ -31,7 +31,21 @@ Sabemos que *Faster R-CNN* da, para cada candidato de objeto, dos salidas:
 
 Con *Mask R-CNN* se le añade una nueva salida que es la máscara de segmentación del objeto.
 
-Explicación rápida de  Faster R-CNN (dos líneas) y luego de cómo se amplía para mask R-CNN
+![Mask RCNN framework](images/framework.png)
+
+
+**Faster R-CNN** tiene dos etapas: una primera en la que se dan propuestas de *bounding boxes* para los objetos, y la segunda (que es en sencia *Fast-RCNN*), extrae características usándo **RoIPooling** por cada propuesta que ha obtenido y luego realiza clasificación y regresión sobre las *bounding-box*.
+
+**Mask R-CNN** tiene las dos mismas etapas, con la diferencia que en la segunda, en *paralelo* a predecir la clase y la *bounding-box*, también aporta una máscara de segmentación para cada *RoI*.
+
+Duranete el entrenamiento, se define una **función de pérdida** con múltiples factores por cada *RoI*, tenemos la función:
+$$
+L = L_{cls} + L_{box} + L_{mask}
+$$
+
+En *Faster-RCNN* teníamos sumando la función de pérdida de la clasificación ($L_{cls}$) y la de la *bounding-box* ($L_{box}$). Ahora, añadimos un sumando a la función, la función de pérdida de la máscara de segmentación de cada objeto ($L_{mask}$).
+
+Es importante denotar que gracias a $L_{mask}$, las máscaras y las predicciones de clases están desacopladas, al contrario que cuando se aplican *FCN* para segmentación semántica. Este desacople ayuda mucho a una buena segmentación de instancias.
 ## El modelo de CNN
 
 
