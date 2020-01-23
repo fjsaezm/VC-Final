@@ -86,6 +86,7 @@ En la zona de descargas de la base de datos, encontramos el archivo *train-annot
 
 En un principio,pensamos que con estos clicks sería suficiente para generar las máscaras de cada imagen sin tener que descargar todos los archivos, así que cuando programamos la clase, hicimos una zona de código en la que a partir de las coordenadas de los clicks, obteníamos la máscara. Sin embargo, debido a que en ocasiones los clicks no se tomaban en orden,las máscaras tenían formas extrañas y no representaban bien al objeto que querían señalar.
 
+
 Una vez teníamos este archivo, pudimos descargar las imágenes con este código:
 
 ```python
@@ -238,6 +239,8 @@ Para ello, es necesario crear dos clases nuevas con relaciones de herencia sobre
 
 La primera de las dos clases proporciona al modelo cierta configuración para el entrenamiento. Lo que hacemos en ella es definir una serie de parámetros que se utilizan a la hora de entrenar el modelo. Tomamos primero una de uno de los ejemplos y la adaptamos para que obedezca a los parámetros de nuestra base de datos.
 
+Es importante saber que esta clase hereda de ```Config```, que la tenemos definida en el archivo ```config.py``` que obtenemos en el repositorio que hemos clonado.
+
 ```python
 class TrafficConfig(Config):
     """Configuration for training on the birds dataset.
@@ -271,7 +274,7 @@ class TrafficConfig(Config):
 
 Existen algunos parámetros más que podemos utilizar, pero no hemos podido probar el funcionamiento de los mismos debido a que no hemos podido entrenar la red al no consguir cargar bien el conjunto de datos. A destacar, tenemos:
 
-- *LEARNING_RATE*, que hemos comentado antes que en el modelo afirman que es mejor que sea $LEARNING_RATE < 0.02$. Podemos ajustarlo y ver cómo afecta esto al entrenamiento.
+- *LEARNING_RATE*, que hemos comentado antes que en el modelo afirman que es mejor que sea $LEARNING\_RATE < 0.02$. Podemos ajustarlo y ver cómo afecta esto al entrenamiento.
 - *IMAGE_RESIZE_MODE*, que nos permite que las imágenes se transformen en el modelo. También se le puede poner una dimensión mínima y una máxima con *IMAGE_MIN_DIM/IMAGE_MAX_DIM*
 
 Una vez que hemos definido nuestra configuración, tenemos que crear un objeto con este tipo para pasárselo al modelo y que conozca la configuración que queremos.
@@ -430,12 +433,233 @@ Sin embargo, esta implementación no generaba bien las máscaras de las imágene
 - Con bordes muy pronunciados
 - Que no correspondían nada bien con el objeto que se quería segmentar
 
+Podemos observar un ejemplo de esto en la siguiente imagen:
+
+![Error en máscara de segmentación](images/error.jpg)
+
 Fue por ello que tuvimos que realizar todo el cambio en la estructura, y pasar de no subir las máscaras a *Drive* a subirlas y cambiar por tanto esta función para que leyese la máscara necesaria en cada caso.
 
 Esta nueva implementación nos ayudó a obtener unos mejores resultados en obtención ed las máscaras.
 
+**Observación.-** Haciendo pruebas para ver qué estaba sucediendo, hemos llegado a la conclusión de que posiblemente en ocasiones los puntos se tomasen desordenados. De hecho, si tomamos unos puntos concretos para la máscara, digamos por ejemplo:
+```
+r=[30,190,30,190]
+c=[30,190,190,30]
+```
+Estos son los puntos de un cuadrado desordenados. Esto es, si un cuadrado es *ABDC*, en este caso tendríamos los vértices en orden *ACBD*. Con esto, el resultado que obtenemos es el siguiente:
+![Error en máscara de segmentación manual](images/cuadrado.jpg)
 
-# Referencias
+Donde podemos ver que los vértices se han unido con el siguiente en la lista, que no es con el que deberían unirse en una máscara real, por lo que de ahí podría venir el error.
+
+### load_image
+
+Esta función no tiene mucha relevancia, pero tuvimos que hacerle *override* pues lo solicitaba para hacer pruebas una vez que se habia creado el objeto de tipo *TrafficDataset* para poder probar que todo se está ejecutando correctamente. El código es muy sencillo:
+```python
+def load_image(self, image_id):
+        """Load images according to the given image ID."""
+        info = self.image_info[image_id]
+        image = skimage.io.imread(info['path'])
+        return image
+```
+
+Más adelante veremos cómo utilizamos esta función
+
+# El entrenamiento
+
+Una vez que tenemos definida esta clase, podemos crear una instancia de la misma que contenga el conjunto de *train* y otra que contenga el conjunto de *validation* para poder entrenar el modelo. 
+
+Lo primero que tenemos que hacer es crear un modelo tomado del paquete que hemos obtenido. Hay que crearlo en modo entrenamiento. Realizamos lo siguiente:
+```python
+model = modellib.MaskRCNN(mode="training", config=config,
+                                  model_dir=MODEL_DIR)
+# Cargamos los pesos de Coco ya preentrenado
+model.load_weights(COCO_WEIGHTS_PATH, by_name=True,
+                    exclude=["mrcnn_class_logits", "mrcnn_bbox_fc",
+                                "mrcnn_bbox", "mrcnn_mask"])
+```
+En la segunda línea le cargamos los pesos de **MS-COCO**, como hemos indicado antes que haríamos. Además, hay que excluirle cierto tipo de capas como las que hemos excluido. Esto se debe a que serán diferentes debido a que las clases de objetos que queremos detectar no serán las mismas.
+
+Tras haber cargado los pesos, podemos crear los dos datasets para *train* y validación* de la siguiente manera:
+```python
+# Set train
+dataset_train = TrafficDataset()
+
+informacion_imagenes = pd.read_csv(ANNO_DIR)
+dataset_train.load_dataset(IMAGE_DIR, trainID, new_csv)
+dataset_train.prepare()
+
+# Validation dataset
+dataset_val = TrafficDataset()
+dataset_val.load_dataset(IMAGE_DIR, valID, new_csv)
+dataset_val.prepare()
+```
+Esto nos prepara los datasets para que se los podamos pasar directamente como parámetros al modelo en la función que entrenará.
+
+Al ejecutar estas líneas de código, no obtenemos ningún fallo aparente y, como veremos, podemos mostrar las imágenes y las máscaras que tienen, pero a la hora de entrenar obtendremos un fallo.
+
+## Visualizando los datos
+
+El archivo ```visualize.py```, como hemos comentado antes, nos proporciona utilidades para ver que todo esté ocurriendo con normalidad en cuanto a los datos se refiere. Existe un sencillo ejemplo de uso del mismo, que hemos utilizado para comprobar que las imágenes se está cargando bien
+
+**Nota.-** Haciendo uso de esta función fue cuando nos dimos cuenta de que las máscaras mediante clicks no eran las correctas, y tuvimos que cambiar la implementación.
+
+```python
+# Inspect the train dataset
+print("Image Count: {}".format(len(dataset_val.image_ids)))
+print("Class Count: {}".format(dataset_val.num_classes))
+for i, info in enumerate(dataset_val.class_info):
+    print("{:3}. {:50}".format(i, info['name']))
+  
+# Load and display random samples
+image_ids = np.random.choice(dataset_val.image_ids, 1)
+for image_id in image_ids:
+    image = dataset_val.load_image(image_id)
+    mask, class_ids = dataset_val.load_mask(image_id)
+    visualize.display_top_masks(image, mask, class_ids,
+                                dataset_val.class_names)
+```
+Utilizamos este código para:
+
+- En la primera parte, comprobar que las clases, y el número de imágenes es el correcto.
+- En la segunda parte, obtenemos un subconjunto aleatorio de tamaño que queramos, y mostramos tanto la imagen original como cada una de las máscaras con las clases.
+
+La salida que obtenemos de este código es la siguiente:
+```
+Image Count: 1
+Class Count: 5
+  0. BG                                                
+  1. Person                                            
+  2. TrafficLight                                      
+  3. Car                                               
+  4. TrafficSign   
+```
+![Test validation](images/test.png)
+
+Comentando primero que, para hacer la prueba, se había tomado como tamaño de conjunto de validación $n = 1$, vemos que se toma bien cuántas imágenes hay y las diferentes clases.
+
+Además, se puede ver como carga bien la única máscara que tiene la imagen, que es la cara de una persona y su brazo.
+
+## El entrenamiento
+
+Una vez tenemos todos los elementos preparados, podemos pasar a entrenar la red. Nosotros , sin embargo, hemos obtenido un fallo en la creación del dataset que nos impide que la red pueda entrenar, pues da error con los ```class_id``` de las imágenes.
+
+Para realizar el entrenamiento, como es ya sabido de prácticas anteriores, tenemos que realizar lo siguiente:
+
+```python
+print("Training network heads")
+model.train(dataset_train, dataset_val,
+            learning_rate=config.LEARNING_RATE,
+            epochs=2,
+            layers='all')
+```
+Con esto , el modelo entrenaría usando el dataset que hemos creado, tomando el ```LEARNING_RATE``` de nuestro configs, durante 2 épocas y todas las capas.
+
+Sin embargo, debido a que hemos estado todo el tiempo trabajando para conseguir darle forma a los datos que se nos daban de forma tan desestructurada debido a su gran cantidad y formato, no lo hemos conseguido hasta el último momento, al intentarlo nos apareció un error que no hemos conseguido solucionar con el tiempo suficiente como para que pudiésemos entrenar la red.
+
+La red comenzaba a entrenar y a los pocos segundos obteníamos el siguiente error:
+```python
+ERROR:root:Error processing image {'id': '23938d05c8b7588a', 'source': 'traffic', 'path': '/content/drive/My Drive/data/images2/23938d05c8b7588a.jpg', 'width': 1024, 'height': 678}
+Traceback (most recent call last):
+  File "/root/Mask_RCNN/mrcnn/model.py", line 1709, in data_generator
+    use_mini_mask=config.USE_MINI_MASK)
+  File "/root/Mask_RCNN/mrcnn/model.py", line 1265, in load_image_gt
+    class_ids = class_ids[_idx]
+TypeError: only integer scalar arrays can be converted to a scalar index
+```
+
+Que no conseguimos solucionar. Es posible que no sea un error de tener un fallo grande de concepto, pero la base de datos nos ha comido demasiado el tiempo.
+
+## La evaluación de los datos
+
+A pesar de no haber podido entrenar nuestra red, teníamos información de cuales eran los procedimientos que debíamos seguir para comprobar cómo de bueno estaba siendo el entrenamiento con nuestro conjunto de datos.
+
+Lo primero que se debe hacer tras entrenar es siempre coger un conjunto de *test* y aplicarle un predictor, para ver qué información nos devuelve sobre nuestra imagen, es decir, qué objetos cree que hay en ella y sus máscaras de segmentación.
+
+Para ello, debemos definir una nueva clase de configuración del modelo, en la que ahora el modo que tendremos no será de *training* como en el caso anterior, sino que será un modo de *inferencia* sobre la entrada.  La implementación es cortita:
+```python
+class InferenceConfig(TrafficConfig):
+            # Set batch size to 1 since we'll be running inference on
+            # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
+            GPU_COUNT = 1
+            IMAGES_PER_GPU = 1
+            DETECTION_MIN_CONFIDENCE = 0
+config = InferenceConfig()
+```
+Con esta nueva configuración, podemos tomar los pesos que hemos cargado y darle al modelo un modo de inferencia de la siguiente manera:
+```python
+model = modellib.MaskRCNN(mode="inference", config=config,
+                                  model_dir=DEFAULT_LOGS_DIR)
+model.load_weights(model.find_last(),True)
+```
+
+De este modo, podremos aplicar la función predict sobre los datos de entrada para obtener la salida que ya hemos comentado. 
+
+Ahora, una vez que tenemos el resultado de qué ha predicho nuestro modelo, ¿ cómo medimos la bondad del resultado ? Usamos la métrica **mAP**
+
+### mAP
+
+Esta métrica de precisión es muy utilizada en proyectos en los que se tratan de reconocer un conjunto de objetos. Esta viene definida como
+$$
+MAP = \frac{\sum_{q = 1}^Q AveP(q)}{Q}
+$$
+donde $Q$ es el número de elementos en el set, y $AveP(a)$ es la precisión media *AP* para un elemento del conjunto, $q$.
+
+Para calcular esta métrica, disponemos de la función ```calculate_ap``` en el paquete ```utils.py```. Esto se calcula para una imagen. Cuando lo tenemos para todas las imágenes, aplicamos la fórmula anterior.
+
+Esta función necesita un parámetro *IoU* (*intersection of union*), al que le podemos diferentes valores según nos interese obtener un resultado más o menos estricto.
+
+Existe también una función que nos permite calcular todas las *mAP* en un rango, haciendo pequeños incrementos. Esta es ```calculate_ap_range```, disponible en el mismo paquete.
+
+
+# Propuestas de mejora y Conclusión
+
+## Propuestas de mejora
+
+Se proponen a continuación una serie de ideas que teníamos para tratar de mejorar los resultados que nos diese primeramente la red entrenada de la forma más básica.
+
+1. La primera y la más obvia, es realizar el entrenamiento entrenando solo la última capa. Con esto dejamos que el modelo actúe de extractor de características y entrenamos la salida. Esto se haría sencillamente cambiando el parámetro en la función de entrenamiento de un modelo de la forma:
+```python
+model.train(dataset_train, dataset_val,
+            learning_rate=config.LEARNING_RATE,
+            epochs=2,
+            layers='heads')
+```
+El tiempo de entrenamiento sería muchísimo menor, ya que tendríamos que entrenar muchas menos capas. Sería un buen punto de partida para ver qué ocurre si no entrenamos nada de la red salvo la salida.
+
+2. Profundizar un poco, congelando algunas capas más que sólamente las *heads*. El planteamiento es el siguiente, mantener las primeras capas congeladas, pues han entrenado mucho en bases de datos muy grandes y podemos presuponer que son una base sobre la que alzar nuestro castillo. Por ello, podemos congelar un número determinado de capas externas que son las que decidirán los detalles finales sobre los pesos de salida (esto es lo que se conoce como **fine tuning**). 
+Por ejemplo, ya que nuestro modelo tiene *224* capas, podemos congelar un número significativo. Pongamos por ejemplo, un $10\%$ de la red, es decir, unas $22$ capas, las finales.
+Esto podría hacer que nuestro modelo tras haber extraído las características iniciales , entrenase bien para ajustarse a los datos concretos de nuestro modelo. Se haría fácilmente de la siguiente manera.
+```python
+model.train(dataset_train, dataset_val,
+            learning_rate=config.LEARNING_RATE,
+            epochs=2,
+            layers='22+')
+```
+
+3. Comparar el resultado del congelamiento del $10%$ de las capas con el resultado de congelar tanto el $15\%$ como el $5\%$. Podríamos compararlos comparando la **mAP** de los tres casos. Esto nos podría ayudar a conocer si a la hora de ajustar el modelo, es necesario congelar algunas capas más, o hemos congelado capas de sobra.
+
+4. Realizar *data augmention*. Nuestra cantidad de datos era bastante reducida por el número de archivos que *Drive* nos dejaba tener y por la lentitud de *Google Collaboratory* para procesarlos desde drive. Es por ello que utilizando aumento de datos como vimos en la práctica dos, podría hacer que el entrenamiento fuese más efectivo, teniendo más posibilidades en el entrenamiento del modelo. Esto se realizaría sencillamente de la siguiente forma:
+```python
+# Right/Left flip 50% of the time
+augmentation = imgaug.augmenters.Fliplr(0.5)
+
+model.train(dataset_train, dataset_val,
+            learning_rate=config.LEARNING_RATE,
+            epochs=2,
+            layers='+22')
+            #augmentation=augmentation)
+```
+
+
+
+## Conclusión
+
+A pesar de la gran cantidad de tiempo dedicado al trabajo, la desorganización en los datos que teníamos que manejar nos ha retrasado más de lo esperado y no hemos podido obtener los resultados que queríamos.
+
+Hemos experimentado cómo es ponerse al frente de una base de datos que no esté preparada para llegar y besar el santo, y también cómo aunque nuestros propios dispositivos tengan memoria suficiente como para guardar la base de datos entera, no serían capaces ni de terminar una época del entrenamiento de una red así antes de romperse por completo.
+
+Sin embargo, hemos adquirido conocimientos sobre cómo enfrentarnos a estas bases de datos, sobre la estructura que tiene una *Mask R-CNN* y su funcionamiento y sobre como tendríamos que enfocar el problema de adaptar una base de datos nueva a un problema ya existente con unos pesos ya existentes, cosa que desconocíamos hasta el momento.
+
 
 [oiv4segmentation]:https://github.com/EscVM/OIDv4_ToolKit
 [dirtySegmentationdownloaderOIV5]:https://github.com/WyattAutomation/dirtySegmentationdownloaderOIV5/blob/master/dirtySegmentationJPGdl.py
