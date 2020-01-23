@@ -656,7 +656,7 @@ model.train(dataset_train, dataset_val,
 
 A pesar de la gran cantidad de tiempo dedicado al trabajo, la desorganización en los datos que teníamos que manejar nos ha retrasado más de lo esperado y no hemos podido obtener los resultados que queríamos.
 
-Hemos experimentado cómo es ponerse al frente de una base de datos que no esté preparada para llegar y besar el santo, y también cómo aunque nuestros propios dispositivos tengan memoria suficiente como para guardar la base de datos entera, no serían capaces ni de terminar una época del entrenamiento de una red así antes de romperse por completo.
+Hemos experimentado cómo es ponerse al frente de una base de datos de tamaño considerable, como son $512GB$ sólo en el conjunto de entrenamiento, y también cómo aunque nuestros propios dispositivos tengan memoria suficiente como para guardar la base de datos entera, no serían capaces ni de terminar una época del entrenamiento de una red así antes de romperse por completo.
 
 Sin embargo, hemos adquirido conocimientos sobre cómo enfrentarnos a estas bases de datos, sobre la estructura que tiene una *Mask R-CNN* y su funcionamiento y sobre como tendríamos que enfocar el problema de adaptar una base de datos nueva a un problema ya existente con unos pesos ya existentes, cosa que desconocíamos hasta el momento.
 
