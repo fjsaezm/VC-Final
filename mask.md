@@ -16,7 +16,7 @@ La segmentación de instancias en imágenes es uno de los problemas más importa
 
 **Definición.-** La *segmentación de instancias* en una imagen consiste en, para cada objeto dentro de una imagen, detectarlo y delimitar la zona de la imagen que ocupa.
 
-![Instance Segmentation](images/iseg.png)
+![Instance Segmentation](images/iseg.png){ width=50% }
 
 Existen diferentes modelos de *CNNs* que son capaces de obtener muy buenos resultados tanto en detección de objetos como en segmentación de imágenes, como *Fast/Faster R-CNN*. Es más complicado hacer la segmentación de instancias, pues requiere que nuestra red neuronal realice con precisión ambas tareas anteriores.
 
@@ -31,7 +31,7 @@ Sabemos que *Faster R-CNN* da, para cada candidato de objeto, dos salidas:
 
 Con *Mask R-CNN* se le añade una nueva salida que es la máscara de segmentación del objeto.
 
-![Mask RCNN framework](images/framework.png)
+![Mask R-CNN framework](images/framework.png){ width=50% }
 
 
 **Faster R-CNN** tiene dos etapas: una primera en la que se dan propuestas de *bounding boxes* para los objetos, y la segunda (que es en sencia *Fast-RCNN*), extrae características usándo **RoIPooling** por cada propuesta que ha obtenido y luego realiza clasificación y regresión sobre las *bounding-box*.
@@ -49,5 +49,19 @@ Es importante denotar que gracias a $L_{mask}$, las máscaras y las predicciones
 ## El modelo de CNN
 
 
+# El dataset: Open Images Dataset V5
 
+Lo primero que tuvimos que pensar tras escoger el tema del trabajo, fue qué dataset escoger para el entrenamiento de nuestra red neuronal. A propuesta del profesor, decidimos utilizar [Open Images Dataset](https://storage.googleapis.com/openimages/web/index.html). En concreto, comenzamos a explorar la versión número *5* de este conjunto de datos, pues es en ella donde se ha introducido al dataset la información necesaria para la **segmentación de instancias**. Posee además información sobre *bounding-boxes*. Con la elección de este *dataset*, comenzó nuestra odisea de intentar obtener un subconjunto de todos los datos que contiene.
+
+En un principio, este *dataset* contiene:
+
+- Sobre 9 millones de imágenes
+- 15,851,536 cajas en 600 categorías
+- 2,785,498 instance segmentations en 350 categorías
+
+La enorme cantidad de imágenes hace que solamente el conjunto de las imágenes pese $512GB$. Esto se nos antojaba desde el principio demasiada información, así que pensamos que podríamos tratar de obtener una partición de este subconjunto. 
+
+Lo primero que hicimos fue ponernos en contacto con soporte de la página. Le comentamos que queríamos hacer un proyecto y que nos gustaría obtener un subconjunto del dataset porque el tamaño nos parecía demasiado elevado. La respuesta que obtuvimos andaba en las líneas de: "hoy día un disco duro de ese tamaño no es muy caro, comprad uno para guardar el dataset".
+
+Ante esta respuesta, decidimos buscar por internet si alguien había hecho una herramienta para obtener una cantidad algo más pequeña de imágenes seleccionando, por ejemplo, ciertas clases.
 ## Subsection
