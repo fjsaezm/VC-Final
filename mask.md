@@ -611,7 +611,115 @@ Esta función necesita un parámetro *IoU* (*intersection of union*), al que le 
 Existe también una función que nos permite calcular todas las *mAP* en un rango, haciendo pequeños incrementos. Esta es ```calculate_ap_range```, disponible en el mismo paquete.
 
 
-# Propuestas de mejora y Conclusión
+# Solucionando errores
+
+## Errores en las máscaras
+
+El tiempo dedicado a la base de datos nos desvió de la tarea central: **adaptar la Mask R-CNN a nuestra base de datos**. Los últimos avances que conseguimos nos permitían ya cargar las imágenes con sus respectivas máscaras proporcionadas.
+
+Aquí nos surge otro problema:
+
+![Not enough masks providen in image](images/nopeople.png)
+
+Como podemos ver, hay muchas más personas en la imagen de las que se nos muestran visualizando la unión de las máscaras obtenidas. Esto es un gran error, pues al entrenar, cuando el modelo tome las máscaras de la imagen, no tendrá todas las personas y obtendrá por tanto una información errónea de cuándo existe o no una persona en nuestra foto.
+
+Decidimos comprobar esto. Recordamos que los nombres de las imágenes de las máscaras empiezan por el nombre de la imagen a la que corresponden. Así, creamos este script para comprobar cuántas máscaras hay en una imagen determinada en la que hay personas. El código es simple, y el archivo lo llamamos ```test.py```:
+
+```python
+import os
+from os.path import isfile,join
+from os import listdir
+
+i = 0
+
+mask = "../../Downloads/train-masks-0/"
+onlyfiles = [f for f in listdir(mask) if isfile(join(mask, f))]
+id = "0a7e0b2c83069f3c"
+
+for f in onlyfiles:
+    if id in f:
+        i = i+1
+
+print(i)
+```
+Cuenta cuántas imágenes hay que contengan el id de la imagen. La imagen escogida es la siguiente:
+
+![Lots of people](images/people.jpg){ width=50% }
+
+Y, si ejecutamos el script, el resultado obtenido es:
+
+```bash
+[fjsaezm@fjsaezm VC-Final]$ python test.py 
+8
+
+```
+Como vemos, tenemos muchas menos máscaras que personas. Esto es grave para el entrenamiento de nuestra red. Sin embargo, esto escapa de nuestras manos, pues esta información es la que se nos da desde la base de datos.
+
+## Error en el entrenamiento
+
+Haciendo referencia al error mencionado al intentar entrenar la red
+
+```python
+ERROR:root:Error processing image {'id': '23938d05c8b7588a', 'source': 'traffic', 'path': '/content/drive/My Drive/data/images2/23938d05c8b7588a.jpg', 'width': 1024, 'height': 678}
+Traceback (most recent call last):
+  File "/root/Mask_RCNN/mrcnn/model.py", line 1709, in data_generator
+    use_mini_mask=config.USE_MINI_MASK)
+  File "/root/Mask_RCNN/mrcnn/model.py", line 1265, in load_image_gt
+    class_ids = class_ids[_idx]
+TypeError: only integer scalar arrays can be converted to a scalar index
+```
+
+Este tenía fácil solución. Estábamos tomando como *id* de las imágenes su propio nombre. Sin embargo, estos eran alfanuméricos y la *API* que se nos proporciona solo nos permitía que fuesen numéricos. 
+Así, tuvimos que hacer un pequeño cambio en la función ```load_dataset```, a la hora de recorrer las imágenes para introducirlas. Lo que hacemos es numerarlas según nos las encontremos, y asignar este número como **id**. El resultado es el siguiente:
+
+```python
+def load_dataset(self, dataset_dir, subset,f):
+        "Add the images to the dataset"
+        name_num = [["Person",['/m/01g317']],["TrafficLight",['/m/015qff']],["Car",['/m/0k4j']],["TrafficSign",['/m/01mqdt']]]
+        # Add classes
+        for i,clase in enumerate(name_num):
+          self.add_class("traffic", class_to_ind(clase[1][0]), clase[0])
+
+        # Add images 
+        # Cojo todas las filas que tengan una clase de las cuales estudiamos
+        u = f.loc[f['LabelName'].isin([clase[1][0] for clase in name_num])]
+        # Cojo todos los ids de las imagenes y elimino los duplicados
+        # Para cada ID
+        for i,image_id in enumerate(subset):
+          # Cojo las filas en las que aparece el ID
+          datos_imagen = u.loc[u['ImageID'].isin([image_id])]
+          image_dir = "{}/{}.jpg".format(dataset_dir, image_id)
+          image = skimage.io.imread(image_dir)
+          height, width = image.shape[:2]
+          self.add_image(
+                "traffic",
+                image_id = i,  # use file name as a unique image id
+                image_name = image_id,
+                path=image_dir,
+                clases = [class_to_ind(clase) for clase in datos_imagen['LabelName']],
+                path_masks = [path for path in datos_imagen['MaskPath']])
+```
+
+# Resultados,propuestas de mejora y conclusión
+
+## Resultados
+
+Tras haber conseguido hacer pequeños entrenamientos de la red al solucionar los errores, intentamos hacer entrenamientos. Sin embargo, los resultados que obtenemos son pésimos. Esto se debe a que los entrenamientos requieren un número de imágenes mayor, además de que , como hemos comentado, no tenemos toda la información de las máscaras de una imagen. Es por ello que el modelo detectas cosas aleatorias en la imagen, que ni si quiera concuerdan con lo que debería ser realmente.
+
+Algunos ejemplos de resultados son:
+
+![Bad detection on people](images/peopledetection.jpg)
+
+![Bad detection on a car](images/badcar.jpg)
+
+Como podemos ver, los resultados dejan mucho que desear.
+
+- Las máscaras de segmentación dadas son pésimas
+- La certeza de que tenemos determinados objetos es bastante baja
+- El modelo encuentra objetos que no existen
+
+Esto es claramente debido al pequeño número de imágenes dadas, los errores en las máscaras y las pocas épocas que hemos podido dar al entrenamiento.
+
 
 ## Propuestas de mejora
 

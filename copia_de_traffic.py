@@ -12,6 +12,7 @@ Original file is located at
 !rm -rf ~/Mask_RCNN
 !git clone --quiet https://github.com/matterport/Mask_RCNN.git
 # %cd ~/Mask_RCNN
+!ls mrcnn
 
 !pip install -q PyDrive
 !pip install -r requirements.txt
@@ -20,6 +21,7 @@ Original file is located at
 
 from mrcnn.config import Config
 from mrcnn import model as modellib, utils
+from samples import coco
 
 import os
 import sys
@@ -50,7 +52,7 @@ ANNO_DIR = ROOT_DIR + "train-annotations-object-segmentation.csv"
 # MODEL_DIR
 MODEL_DIR = "/content/logs"
 # MASKS 
-MASK_DIR = ROOT_DIR + "masks"
+MASK_DIR = ROOT_DIR + "masks/"
 
 from os import scandir
 
@@ -90,29 +92,27 @@ class TrafficConfig(Config):
     # Train on 1 GPU and 8 images per GPU. We can put multiple images on each
     # GPU because the images are small. Batch size is 8 (GPUs * images/GPU).
     GPU_COUNT = 1
-    IMAGES_PER_GPU = 8
+    IMAGES_PER_GPU = 2
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 4  # background + Traffic Lights + People + Cars + Traffic Signs
 
     # Use small images for faster training. Set the limits of the small side
     # the large side, and that determines the image shape.
-    #IMAGE_MIN_DIM = 128
-    #IMAGE_MAX_DIM = 128
+    IMAGE_RESIZE_MODE = "square"
+    IMAGE_MIN_DIM = 1024
+    IMAGE_MAX_DIM = 1024
+    # Training steps per epoch
+    STEPS_PER_EPOCH = 250
 
-    # Use smaller anchors because our image and objects are small
-    #RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
+    # Nº of steps at the end of training
+    VALIDATION_STEPS = 25
 
-    # Reduce training ROIs per image because the images are small and have
-    # few objects. Aim to allow ROI sampling to pick 33% positive ROIs.
-    #TRAIN_ROIS_PER_IMAGE = 32
+    # Backbone. Resnet50 makes net faster
+    BACKBONE = "resnet50"
 
-    # TODO: Change
-    # Use a small epoch since the data is simple
-    #STEPS_PER_EPOCH = 100
+    LEARNING_RATE = 0.01
 
-    # use small validation steps since the epoch is small
-    #VALIDATION_STEPS = 5
 config = TrafficConfig()
 config.display()
 
@@ -142,7 +142,7 @@ class TrafficDataset(utils.Dataset):
         u = f.loc[f['LabelName'].isin([clase[1][0] for clase in name_num])]
         # Cojo todos los ids de las imagenes y elimino los duplicados
         # Para cada ID
-        for image_id in subset:
+        for i,image_id in enumerate(subset):
           # Cojo las filas en las que aparece el ID
           datos_imagen = u.loc[u['ImageID'].isin([image_id])]
           image_dir = "{}/{}.jpg".format(dataset_dir, image_id)
@@ -150,57 +150,38 @@ class TrafficDataset(utils.Dataset):
           height, width = image.shape[:2]
           self.add_image(
                 "traffic",
-                image_id= image_id,  # use file name as a unique image id
+                image_id = i,  # use file name as a unique image id
+                image_name = image_id,
                 path=image_dir,
-                width=width, height=height )#,
-                #clases = [class_to_ind(clase) for clase in datos_imagen['LabelName']],
-                #polygons=[puntos for puntos in datos_imagen['Clicks']])
+                clases = [class_to_ind(clase) for clase in datos_imagen['LabelName']],
+                path_masks = [path for path in datos_imagen['MaskPath']])
  
     def load_mask(self, image_id):
         """Generate instance masks for an image.
-       Returns:
+        Returns:
         masks: A bool array of shape [height, width, instance count] with
             one mask per instance.
         class_ids: a 1D array of class IDs of the instance masks.
         """
         info = self.image_info[image_id]
-        # Get mask directory from image path
-        mask_dir = MASK_DIR
-        #mask_dir = os.path.join(os.path.dirname(os.path.dirname(info['path'])), "masks")
+
         mask = []
-        maskfiles = [f for f in listdir(mask_dir) if isfile(join(mask_dir, f))]
-        for m in maskfiles:
-          mn = m.split(".")[0]
-          if info["id"] in mn:
-            #print(info["id"],":match!:",mn)
-            maskclass = m.split("_")[1]
-            id  = "/"+maskclass[0]+"/"+maskclass[1:len(maskclass)]
-            print(id)
-            if class_to_ind(id) > 0:
-              mask.append(m)
-        
-        count = len(mask)
-        class_ids = []
-        #finalmask = np.zeros([info['height'],info['width'],len(mask)])
-        finalmask = []
-        for index,item in enumerate(mask):
-          path = mask_dir+"/"+item
-          #print(path)
-          #r = skimage.io.imread(path)[:,:,np.newaxis]
-          r = skimage.io.imread(path)
-          #finalmask[:, :, i:i + 1] = self.draw_shape(mask[:, :, i:i + 1].copy(),
-          #                                        r, dims, 1)
-          finalmask.append(r)
-          maskclass = item.split("_")[1]
-          #print(maskclass)
-          class_ids.append(maskclass) 
+        clases = []
+        for i, p in enumerate(info["path_masks"]):
+            #clases.append(class_to_ind(info['clases'][i]))
+            mask_ = skimage.io.imread(MASK_DIR + p,True)
+            mask_ = np.where(mask_ > 128, 1, 0)
+            # Fill holes in the mask
+            #mask_ = binary_fill_holes(mask_).astype(np.int32)
+            # Add mask only if its area is larger than one pixel
+            if np.sum(mask_) >= 1:
+                mask.append(np.squeeze(mask_))
 
-        class_ids = [ "/"+c[0]+"/"+c[1:len(c)] for c in class_ids]
-        #print(class_ids)
-        class_ids = [class_to_ind(c) for c in class_ids]
-        #print(class_ids)
-        finalmask = np.stack(finalmask, axis=-1)
+        mask = np.stack(mask, axis=-1)
 
+        return mask.astype(np.uint8), np.array(info['clases'],dtype=np.int8)
+
+        """
         #Occlusions
         occlusion = np.logical_not(finalmask[:, :, -1]).astype(np.uint8)
         for i in range(count-2, -1, -1):
@@ -210,11 +191,14 @@ class TrafficDataset(utils.Dataset):
         # Return mask, and array of class IDs of each instance. Since we have
         # one class ID, we return an array of ones
         return finalmask, class_ids
+        """
 
     def load_image(self, image_id):
         """Load images according to the given image ID."""
         info = self.image_info[image_id]
         image = skimage.io.imread(info['path'])
+        if len(image.shape)==2:
+          image = skimage.color.gray2rgb(image)
         return image
 
     def image_reference(self, image_id):
@@ -244,9 +228,9 @@ import random
 
 # Pre-known
 num_imgs = 793
-n_all_imgs = 10
-n_train_imgs = 9
-n_val_imgs = 1
+n_all_imgs = 220
+n_train_imgs = 200
+n_val_imgs = 20
 
 
 # 1. Select 600 images
@@ -281,7 +265,7 @@ for i, info in enumerate(dataset_val.class_info):
     print("{:3}. {:50}".format(i, info['name']))
   
 # Load and display random samples
-image_ids = np.random.choice(dataset_val.image_ids, 1)
+image_ids = np.random.choice(dataset_val.image_ids, 5)
 for image_id in image_ids:
     image = dataset_val.load_image(image_id)
     mask, class_ids = dataset_val.load_mask(image_id)
@@ -297,26 +281,30 @@ augmentation = imgaug.augmenters.Fliplr(0.5)
 # Training - Stage 1
 print("Training network heads")
 model.train(dataset_train, dataset_val,
-            learning_rate=config.LEARNING_RATE,
-            epochs=2,
-            layers='heads')
-            #augmentation=augmentation)
+            learning_rate=config.LEARNING_RATE / 10,
+            epochs=10,
+            layers='heads',
+            augmentation=augmentation)
+
+model.keras_model.save_weights(MODEL_DIR+"w2.h5")
 
 # Training - Stage 2
 # Finetune layers from ResNet stage 4 and up
 #print("Fine tune Resnet stage 4 and up")
-#model.train(dataset_train, dataset_val,
-#            learning_rate=config.LEARNING_RATE,
-#            epochs=120,
-#            layers='4+',
-#            augmentation=augmentation)
+model.train(dataset_train, dataset_val,
+           learning_rate=config.LEARNING_RATE / 10,
+           epochs=5,
+           layers='4+',
+           augmentation=augmentation)
+
+model.keras_model.save_weights(MODEL_DIR+"w3.h5")
 
 # Training - Stage 3
 # Fine tune all layers
 #print("Fine tune all layers")
 #model.train(dataset_train, dataset_val,
-#            learning_rate=config.LEARNING_RATE / 10,
-#            epochs=160,
+#           learning_rate=config.LEARNING_RATE / 10,
+#            epochs=5,
 #            layers='all',
 #            augmentation=augmentation)
 
@@ -329,6 +317,46 @@ class InferenceConfig(TrafficConfig):
 config = InferenceConfig()
 config.display()
 
-model = modellib.MaskRCNN(mode="inference", config=config,
+modelI = modellib.MaskRCNN(mode="inference", config=config,
                                   model_dir=DEFAULT_LOGS_DIR)
-model.load_weights(model.find_last(),True)
+modelI.load_weights(model.find_last(),True)
+
+fid = np.random.choice(dataset_train.image_ids, 1)
+original_image = dataset_train.load_image(fid[0])
+results = modelI.detect([original_image], verbose=1)
+
+r = results[0]
+visualize.display_instances(original_image, r['rois'], r['masks'], r['class_ids'], 
+                            dataset_val.class_names, r['scores'])
+
+# Compute mAP
+#APs_05: IoU = 0.5
+#APs_all: IoU from 0.5-0.95 with increments of 0.05
+image_ids = np.random.choice(dataset_val.image_ids, 5)
+APs_05 = []
+APs_all = []
+
+for i, image_id in enumerate(image_ids):
+    # Load images and ground truth data
+    image, image_meta, gt_class_id, gt_bbox, gt_mask = \
+        modellib.load_image_gt(dataset_val, modelI,
+                               image_id, use_mini_mask=False)
+    molded_images = np.expand_dims(modellib.mold_image(image, inference_config), 0)
+    # Run object detection
+    results = model.detect([image], verbose=0)
+    r = results[0]
+    # Compute AP
+    AP_05, precisions, recalls, overlaps = \
+        utils.compute_ap(gt_bbox, gt_class_id, gt_mask,
+                         r["rois"], r["class_ids"], r["scores"], r['masks'])
+    APs_05.append(AP_05)
+
+    AP_all = \
+        utils.compute_ap_range(gt_bbox, gt_class_id, gt_mask,
+                         r["rois"], r["class_ids"], r["scores"], r['masks'])
+    APs_all.append(AP_all)
+    print("image " + str(i) + ": AP_05 = " + str(AP_05) + ", AP_all = " + str(AP_all))
+
+print("mAP: ", np.mean(APs_05))
+print("mAP: ", np.mean(APs_all))
+
